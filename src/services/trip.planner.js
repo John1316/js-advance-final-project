@@ -5,7 +5,8 @@ import { sortHotelsByScore, rankPlaces } from '../utils/ranking.js'
 export async function generateTripPlan(form) {
   const clients = getConfiguredClients()
 
-  const location = await clients.geo.geocode(form.destination)
+  const location =
+    form.location ?? (await clients.geo.geocode(form.destination))
 
   const [weather, hotels, flights] = await Promise.all([
     clients.weather.getWeather({

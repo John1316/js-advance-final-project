@@ -17,9 +17,10 @@ router
   .register(ROUTES.SEARCH, (root) => {
     root._resultsCleanup?.()
     renderSearchView(root, {
-      onSubmit: () => {
+      onSubmit: async (form) => {
+        tripStore.setLoading()
         router.navigate(ROUTES.RESULTS)
-        runGeneration()
+        await runGeneration(form)
       },
     })
   })
@@ -36,11 +37,8 @@ router
   })
   .start()
 
-async function runGeneration() {
-  const { form } = tripStore.getState()
+async function runGeneration(form = tripStore.getState().form) {
   if (!form) return
-
-  tripStore.setLoading()
 
   try {
     const result = await generateTripPlan(form)

@@ -14,7 +14,7 @@ export function validateTripForm(form) {
   }
 
   if (form.startDate && form.endDate && form.endDate <= form.startDate) {
-    errors.endDate = 'End date must be after start date.'
+    errors.endDate = 'End date must be at least one day after the start date.'
   }
 
   const adults = Number(form.adults)

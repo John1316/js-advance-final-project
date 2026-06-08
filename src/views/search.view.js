@@ -10,6 +10,7 @@ import { debounce } from '../utils/debounce.js'
 import { escapeHtml } from '../utils/view.js'
 import { validateTripForm } from '../utils/validators.js'
 import { tripStore } from '../store/trip.store.js'
+import { createGeoService } from '../services/geo.service.js'
 
 function getDefaultForm() {
   return {
@@ -53,6 +54,10 @@ export function renderSearchView(root, { onSubmit }) {
   const formState = existing
     ? { ...existing, interests: new Set(existing.interests) }
     : getDefaultForm()
+  const geoService = createGeoService()
+  let destinationSearchId = 0
+  let destinationSuggestions = []
+  let selectedLocation = formState.location ?? null
 
   root.innerHTML = `
     <section class="page-header">
@@ -61,10 +66,12 @@ export function renderSearchView(root, { onSubmit }) {
     </section>
 
     <form id="trip-form" class="card form-grid" novalidate>
+      <div id="form-summary" class="form-summary hidden" role="alert"></div>
       <div class="field full">
         <label for="destination">Destination</label>
         <input id="destination" name="destination" type="text" placeholder="Paris, Japan, beach honeymoon..." value="${escapeHtml(formState.destination)}" required />
         <small id="destination-hint" class="hint"></small>
+        <div id="destination-results" class="destination-results" aria-live="polite"></div>
         <p class="error" data-error="destination"></p>
       </div>
 
@@ -141,34 +148,93 @@ export function renderSearchView(root, { onSubmit }) {
   `
 
   const form = root.querySelector('#trip-form')
+  const formSummary = form.querySelector('#form-summary')
   const destinationInput = form.querySelector('#destination')
   const destinationHint = form.querySelector('#destination-hint')
+  const destinationResults = form.querySelector('#destination-results')
+  const startDateInput = form.querySelector('#startDate')
+  const endDateInput = form.querySelector('#endDate')
   const budgetSelect = form.querySelector('#budget')
   const customBudgetField = form.querySelector('#custom-budget-field')
+  const submitButton = form.querySelector('button[type="submit"]')
 
-  const updateHint = debounce((value) => {
-    destinationHint.textContent = value.trim()
-      ? `Searching ideas for "${value.trim()}"...`
-      : ''
+  if (startDateInput.value) {
+    endDateInput.min = startDateInput.value
+  }
+
+  startDateInput.addEventListener('change', () => {
+    endDateInput.min = startDateInput.value
+    if (endDateInput.value && endDateInput.value <= startDateInput.value) {
+      endDateInput.value = ''
+    }
+  })
+
+  const searchDestinations = debounce(async (value) => {
+    const query = value.trim()
+    const requestId = ++destinationSearchId
+
+    if (query.length < 2) {
+      destinationSuggestions = []
+      selectedLocation = null
+      destinationHint.textContent = ''
+      destinationResults.innerHTML = ''
+      return
+    }
+
+    selectedLocation = null
+
+    destinationHint.textContent = `Searching destination records for "${query}"...`
+
+    try {
+      const destinations = await geoService.searchDestinations(query)
+      if (requestId !== destinationSearchId) return
+
+      destinationSuggestions = destinations
+      destinationHint.textContent = destinations.length
+        ? 'Select a destination record or keep your typed destination.'
+        : 'No destination records found. You can still keep your typed destination.'
+      destinationResults.innerHTML = renderDestinationResults(destinations)
+    } catch {
+      if (requestId !== destinationSearchId) return
+
+      destinationSuggestions = []
+      destinationHint.textContent = 'Destination search is unavailable. You can still continue.'
+      destinationResults.innerHTML = ''
+    }
   }, 300)
 
   destinationInput.addEventListener('input', (event) => {
-    updateHint(event.target.value)
+    searchDestinations(event.target.value)
+  })
+
+  destinationResults.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-destination-index]')
+    if (!button) return
+
+    const destination = destinationSuggestions[Number(button.dataset.destinationIndex)]
+    if (!destination) return
+
+    selectedLocation = destination
+    destinationInput.value = destination.city || destination.name
+    destinationHint.textContent = 'Destination selected.'
+    destinationResults.innerHTML = ''
   })
 
   budgetSelect.addEventListener('change', () => {
     customBudgetField.classList.toggle('hidden', budgetSelect.value !== 'custom')
   })
 
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault()
     clearErrors(form)
+    hideFormSummary(formSummary)
 
     const formData = new FormData(form)
     const interests = new Set(formData.getAll('interests'))
 
     const payload = {
       destination: formData.get('destination')?.trim() ?? '',
+      location: selectedLocation,
       startDate: formData.get('startDate') ?? '',
       endDate: formData.get('endDate') ?? '',
       adults: formData.get('adults'),
@@ -188,12 +254,62 @@ export function renderSearchView(root, { onSubmit }) {
     const { isValid, errors } = validateTripForm(payload)
     if (!isValid) {
       showErrors(form, errors)
+      showFormSummary(formSummary, 'Please fix the highlighted fields before generating your plan.')
+      scrollToFirstError(form)
       return
     }
 
-    tripStore.setForm(payload)
-    onSubmit(payload)
+    submitButton.disabled = true
+    submitButton.textContent = 'Generating...'
+
+    try {
+      tripStore.setForm(payload)
+      await onSubmit(payload)
+    } catch (error) {
+      submitButton.disabled = false
+      submitButton.textContent = 'Generate Travel Plan'
+      showFormSummary(
+        formSummary,
+        error.message ?? 'Could not start travel plan generation. Please try again.',
+      )
+    }
   })
+}
+
+function renderDestinationResults(destinations) {
+  if (!destinations.length) return ''
+
+  return `
+    <ul>
+      ${destinations
+        .map(
+          (destination, index) => `
+            <li>
+              <button type="button" data-destination-index="${index}">
+                <strong>${escapeHtml(destination.city || destination.name)}</strong>
+                <span>${escapeHtml(destination.name)}</span>
+              </button>
+            </li>
+          `,
+        )
+        .join('')}
+    </ul>
+  `
+}
+
+function showFormSummary(summaryNode, message) {
+  summaryNode.textContent = message
+  summaryNode.classList.remove('hidden')
+}
+
+function hideFormSummary(summaryNode) {
+  summaryNode.textContent = ''
+  summaryNode.classList.add('hidden')
+}
+
+function scrollToFirstError(form) {
+  const firstError = form.querySelector('.error:not(:empty)')
+  firstError?.closest('.field')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
 function clearErrors(form) {

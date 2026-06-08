@@ -3,24 +3,44 @@ import { escapeHtml } from '../utils/view.js'
 import { filterActivitiesByPreferences } from '../utils/ranking.js'
 import { tripStore } from '../store/trip.store.js'
 import { deleteTrip, saveTrip } from '../services/storage.service.js'
+import { generateTripPlan } from '../services/trip.planner.js'
 
 let mapInstance = null
 
 export function renderResultsView(root) {
-  const state = tripStore.getState()
-  const unsubscribe = tripStore.subscribe(() => renderResultsView(root))
-
   root._resultsCleanup?.()
+
+  const unsubscribe = tripStore.subscribe(() => renderResultsView(root))
   root._resultsCleanup = () => unsubscribe()
 
+  const state = tripStore.getState()
+
   if (state.status === TRIP_STATUS.IDLE) {
-    root.innerHTML = `
-      <section class="card empty-state">
-        <h2>No trip generated yet</h2>
-        <p>Fill out the search form first, then come back here for your itinerary.</p>
-        <a href="/search" class="btn btn-primary" data-link>Go to Search</a>
-      </section>
-    `
+    root.innerHTML = state.form
+      ? `
+        <section class="card empty-state">
+          <h2>Ready to generate</h2>
+          <p>Your trip details are saved. Generate the plan to see results.</p>
+          <button id="generate-trip" class="btn btn-primary" type="button">Generate Travel Plan</button>
+        </section>
+      `
+      : `
+        <section class="card empty-state">
+          <h2>No trip generated yet</h2>
+          <p>Fill out the search form first, then come back here for your itinerary.</p>
+          <a href="/search" class="btn btn-primary" data-link>Go to Search</a>
+        </section>
+      `
+
+    root.querySelector('#generate-trip')?.addEventListener('click', async () => {
+      tripStore.setLoading()
+      try {
+        const result = await generateTripPlan(state.form)
+        tripStore.setResults(result)
+      } catch (error) {
+        tripStore.setError(error.message ?? 'Failed to generate travel plan.')
+      }
+    })
     return
   }
 
@@ -257,15 +277,19 @@ async function initMap(root) {
   const lat = Number(mapNode.dataset.lat)
   const lon = Number(mapNode.dataset.lon)
 
-  if (mapInstance) {
-    mapInstance.remove()
-    mapInstance = null
-  }
+  try {
+    if (mapInstance) {
+      mapInstance.remove()
+      mapInstance = null
+    }
 
-  const L = await import('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js')
-  mapInstance = L.map(mapNode).setView([lat, lon], 11)
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors',
-  }).addTo(mapInstance)
-  L.marker([lat, lon]).addTo(mapInstance)
+    const L = await import('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js')
+    mapInstance = L.map(mapNode).setView([lat, lon], 11)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(mapInstance)
+    L.marker([lat, lon]).addTo(mapInstance)
+  } catch {
+    mapNode.innerHTML = '<p class="hint">Map preview is unavailable, but your location data was saved.</p>'
+  }
 }
