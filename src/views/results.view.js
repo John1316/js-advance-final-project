@@ -67,12 +67,13 @@ export function renderResultsView(root) {
   }
 
   const { form, weather, location, hotels, flights, plan, savedTrips } = state
+  const totalTravelers = Number(form.adults) + Number(form.children)
 
   root.innerHTML = `
     <section class="page-header results-header">
       <div>
         <h1>${escapeHtml(form.destination)}</h1>
-        <p>${escapeHtml(form.startDate)} to ${escapeHtml(form.endDate)} - ${form.adults + form.children} travelers</p>
+        <p>${escapeHtml(form.startDate)} to ${escapeHtml(form.endDate)} - ${totalTravelers} travelers</p>
       </div>
       <div class="header-actions">
         <button id="save-trip" class="btn btn-primary" type="button">Save Trip</button>

@@ -8,6 +8,7 @@ import { createAiService } from './ai.service.js'
 const registry = {
   geo: {
     nominatim: createGeoService,
+    mock: createGeoService,
   },
   weather: {
     openweather: createWeatherService,
@@ -26,7 +27,7 @@ const registry = {
 }
 
 export function createApiClient(type, provider = 'mock') {
-  const factory = registry[type]?.[provider]
+  const factory = registry[type]?.[provider] ?? (type === 'ai' ? null : registry[type]?.mock)
   if (!factory) {
     throw new Error(`Unknown provider "${provider}" for type "${type}"`)
   }

@@ -24,7 +24,7 @@ class TripStore {
   }
 
   #notify() {
-    for (const listener of this.#listeners) {
+    for (const listener of [...this.#listeners]) {
       listener(this.getState())
     }
   }

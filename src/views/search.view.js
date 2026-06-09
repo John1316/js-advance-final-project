@@ -204,6 +204,7 @@ export function renderSearchView(root, { onSubmit }) {
   }, 300)
 
   destinationInput.addEventListener('input', (event) => {
+    selectedLocation = null
     searchDestinations(event.target.value)
   })
 
